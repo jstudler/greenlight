@@ -1,0 +1,100 @@
+# Example rules for the public NetBox operator (https://github.com/netboxlabs/netbox-operator).
+#
+# They let an operator that creates PrefixClaims and IpAddressClaims reach
+# Ready without a NetBox instance and without the netbox-operator running.
+#
+# Every expression below is CEL, so string literals need inner quotes:
+# "'COMPLETED'" is the string COMPLETED, while "COMPLETED" is an identifier.
+#
+# Values are derived from a hash of namespace/name. They are therefore stable
+# across restarts and across delete/recreate cycles, which makes them safe to
+# hard-code in end-to-end test assertions.
+apiVersion: statuspatcher.dev/v1alpha1
+kind: GreenlightConfig
+
+params:
+  # The pools that claims without an explicit spec.parentPrefix are served from.
+  defaultIPv4Pool: 10.0.0.0/8
+  defaultIPv6Pool: fd00::/48
+  # Added to every allocation key. Change it to shift all allocations at once,
+  # for example to work around a hash collision.
+  salt: ""
+
+rules:
+  # ---------------------------------------------------------------------------
+  # netbox.dev/v1 PrefixClaim
+  # ---------------------------------------------------------------------------
+  - name: netbox-prefixclaim
+    match:
+      apiGroup: netbox.dev
+      kinds: [PrefixClaim]
+    # Shared opt-out: an object annotated with statuspatcher.dev/skip: "true"
+    # is left completely untouched, which is useful for failure injection.
+    matchConditions: &optOut
+      - name: not-opted-out
+        expression: "object.metadata.?annotations[?'statuspatcher.dev/skip'].orValue('') != 'true'"
+    variables:
+      - name: key
+        expression: "params.salt + object.metadata.namespace + '/' + object.metadata.name"
+      # A claim either names its parent prefix or selects one. The selector
+      # only tells us the address family, so the pool comes from params.
+      - name: parent
+        expression: >-
+          object.spec.?parentPrefix.orValue('') != '' ? object.spec.parentPrefix :
+          (object.spec.?parentPrefixSelector.?family.orValue('IPv4') == 'IPv6'
+            ? params.defaultIPv6Pool : params.defaultIPv4Pool)
+      # spec.prefixLength is a string such as "/25".
+      - name: length
+        expression: "int(object.spec.prefixLength.replace('/', ''))"
+    status:
+      # Always masked: consumers reject a prefix that still has host bits set.
+      prefix: "pickSubnet(variables.parent, variables.length, variables.key)"
+      parentPrefix: "variables.parent"
+      prefixName: "object.metadata.name"
+    # Shared ready condition: Ready is True unless the object is annotated with
+    # statuspatcher.dev/ready: "false".
+    readyCondition: &readyByAnnotation
+      statusExpression: "object.metadata.?annotations[?'statuspatcher.dev/ready'].orValue('true') != 'false'"
+      reason: PrefixClaimResourceReady
+      falseReason: PrefixClaimResourceNotReady
+      message: Prefix assigned
+      messageExpression: >-
+        object.metadata.?annotations[?'statuspatcher.dev/ready'].orValue('true') == 'false'
+          ? 'Ready forced to False via the annotation statuspatcher.dev/ready' : ''
+    conditions:
+      - type: PrefixAssigned
+        reason: PrefixCRCreated
+        falseReason: PrefixCRNotCreated
+        message: ""
+
+  # ---------------------------------------------------------------------------
+  # netbox.dev/v1 IpAddressClaim
+  # ---------------------------------------------------------------------------
+  - name: netbox-ipaddressclaim
+    match:
+      apiGroup: netbox.dev
+      kinds: [IpAddressClaim]
+    matchConditions: *optOut
+    variables:
+      # A usable host inside the claimed parent prefix: for IPv4 prefixes of
+      # /30 or shorter, the network and broadcast addresses are excluded.
+      - name: host
+        expression: >-
+          pickHost(object.spec.parentPrefix,
+                   params.salt + object.metadata.namespace + '/' + object.metadata.name)
+    status:
+      # The bare address, for example 10.1.2.3.
+      ipAddressDotDecimal: "variables.host"
+      # The host route, for example 10.1.2.3/32.
+      ipAddress: "hostCIDR(variables.host)"
+      ipAddressName: "object.metadata.name"
+    readyCondition:
+      <<: *readyByAnnotation
+      reason: IPAddressResourceReady
+      falseReason: IPAddressResourceNotReady
+      message: IP address assigned
+    conditions:
+      - type: IPAssigned
+        reason: IPAddressCRCreated
+        falseReason: IPAddressCRNotCreated
+        message: ""

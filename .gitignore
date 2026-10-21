@@ -1,0 +1,17 @@
+# Build artefacts
+/bin/
+/dist/
+/greenlight
+
+# Scratch and notes
+/tmp/
+
+# Test output
+*.out
+*.test
+cover.html
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,32 @@
+# greenlight needs, for every API group it watches:
+#   * get, list and watch on the resources themselves
+#   * patch on <resource>/status, to write the status with server-side apply
+#   * patch on the resources themselves, but only with --remove-finalizers=true
+#     (the default). Drop that verb if you run with --remove-finalizers=false.
+#
+# Discovery is already covered by the default system:discovery ClusterRole, and
+# no permissions on events are required.
+#
+# Adjust the apiGroups to match your --watch flags. "*" would work too, but
+# granting greenlight write access to every API group is rarely a good idea.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: greenlight
+rules:
+  - apiGroups:
+      - netbox.dev
+    resources:
+      - "*"
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+  - apiGroups:
+      - netbox.dev
+    resources:
+      - "*/status"
+    verbs:
+      - get
+      - patch

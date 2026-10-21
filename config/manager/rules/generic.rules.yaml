@@ -1,0 +1,92 @@
+# A generic, self-contained example for a fictional operator.
+#
+# It shows every feature of the rules format:
+#   * params, including integers that stay integers
+#   * lazily evaluated variables that build on each other
+#   * derived status fields, optional fields and literal values
+#   * a conditional ready status driven by an annotation
+#   * extra managed conditions
+#   * a catch-all rule for every other kind in the group
+#
+# Remember that every expression is CEL. A literal string therefore needs inner
+# quotes: "'COMPLETED'" is the string COMPLETED, "COMPLETED" is an identifier.
+apiVersion: statuspatcher.dev/v1alpha1
+kind: GreenlightConfig
+
+params:
+  endpointPool: 192.0.2.0/24
+  # Integers are preserved as integers, so that CEL arithmetic works.
+  idBase: 4200000000
+  upstreamIds: ["65001", "65002"]
+
+defaults:
+  readyCondition:
+    reason: Greenlit
+    falseReason: NotGreenlit
+    message: Status set by greenlight
+
+rules:
+  # ---------------------------------------------------------------------------
+  # example.com/v1 WidgetClaim: a claim that is answered with an endpoint.
+  # ---------------------------------------------------------------------------
+  - name: example-widgetclaim
+    match:
+      apiGroup: example.com
+      kinds: [WidgetClaim]
+      versions: [v1]
+    matchConditions: &optOut
+      - name: not-opted-out
+        expression: "object.metadata.?annotations[?'statuspatcher.dev/skip'].orValue('') != 'true'"
+    # Simulate a backend that takes a moment to answer.
+    delay: 0s
+    variables:
+      - name: key
+        expression: "object.metadata.namespace + '/' + object.metadata.name"
+      - name: id
+        expression: "hash(variables.key) % 1000000"
+      - name: endpoint
+        expression: "pickHost(params.endpointPool, variables.key)"
+    status:
+      endpoint: "variables.endpoint"
+      endpointCIDR: "hostCIDR(variables.endpoint)"
+      widgetId: "'widget-' + string(variables.id)"
+      # A literal string needs inner quotes.
+      lastOperationStatus: "'COMPLETED'"
+      # A list taken straight from params.
+      upstreamIds: "params.upstreamIds"
+      # An optional field: optional.none() means "do not write this field", and
+      # server-side apply removes it again if greenlight wrote it before.
+      generatedId: >-
+        object.spec.?generateId.orValue(false)
+          ? optional.of(string(params.idBase + variables.id))
+          : optional.none()
+      # A nested object is simply a CEL map. Optional selection (`?field`)
+      # keeps the expression safe when the field is absent.
+      details: >-
+        {'provisionedBy': 'greenlight',
+         'observedSpecGeneration': object.metadata.?generation.orValue(0)}
+    readyCondition: &readyByAnnotation
+      statusExpression: "object.metadata.?annotations[?'statuspatcher.dev/ready'].orValue('true') != 'false'"
+      reason: AllChecksPassed
+      falseReason: NotAllChecksPassed
+      message: Widget provisioned
+      messageExpression: >-
+        object.metadata.?annotations[?'statuspatcher.dev/ready'].orValue('true') == 'false'
+          ? 'Ready forced to False via the annotation statuspatcher.dev/ready' : ''
+    conditions:
+      - type: EndpointAssigned
+        reason: EndpointCreated
+        falseReason: EndpointNotCreated
+        message: ""
+
+  # ---------------------------------------------------------------------------
+  # Every other kind in the group only gets a ready condition.
+  # ---------------------------------------------------------------------------
+  - name: example-catch-all
+    match:
+      apiGroup: example.com
+      kinds: ["*"]
+    matchConditions: *optOut
+    readyCondition:
+      <<: *readyByAnnotation
+      message: Reconciled by greenlight

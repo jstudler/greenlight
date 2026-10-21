@@ -1,0 +1,15 @@
+# Only needed with --leader-elect.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: greenlight-leader-election
+  namespace: greenlight-system
+rules:
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - create
+      - update

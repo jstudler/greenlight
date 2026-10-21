@@ -1,0 +1,82 @@
+# Minimal test fixture for the public netbox.dev API group
+# (https://github.com/netboxlabs/netbox-operator).
+#
+# Only the fields that greenlight reads or writes are modelled. This CRD exists
+# so the integration tests can run against a real API server without installing
+# the netbox-operator.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: prefixclaims.netbox.dev
+spec:
+  group: netbox.dev
+  names:
+    kind: PrefixClaim
+    listKind: PrefixClaimList
+    plural: prefixclaims
+    singular: prefixclaim
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [prefixLength]
+              properties:
+                prefixLength:
+                  type: string
+                  description: The requested length, written as "/25".
+                parentPrefix:
+                  type: string
+                parentPrefixSelector:
+                  type: object
+                  additionalProperties:
+                    type: string
+                tenant:
+                  type: string
+                site:
+                  type: string
+            status:
+              type: object
+              properties:
+                prefix:
+                  type: string
+                parentPrefix:
+                  type: string
+                prefixName:
+                  type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status, reason, message, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      message:
+                        type: string
+                        maxLength: 32768
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0

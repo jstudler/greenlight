@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - manager.yaml
+
+# The rules are mounted at /etc/greenlight. kustomize refuses to read files
+# from outside its own directory, so the rules live in ./rules/, which is kept
+# in sync with examples/ by `make sync-rules`.
+configMapGenerator:
+  - name: greenlight-rules
+    files:
+      - rules/netbox.rules.yaml
+      - rules/generic.rules.yaml
+
+images:
+  - name: greenlight
+    newName: ghcr.io/jstudler/greenlight
+    newTag: latest
